@@ -108,15 +108,15 @@ try:
     
     # ---------------------------------------------------------------
     # STEP 1: Initialize with default High Speed (To avoid KeyError)
-    # Use a moderate data rate to reduce timeout risk while keeping noise reasonable.
+    # Use high data rate to reduce timeout risk and speed reads.
     # ---------------------------------------------------------------
-    if (ADC.ADS1263_init_ADC1('ADS1263_50SPS') == -1):
+    if (ADC.ADS1263_init_ADC1('ADS1263_400SPS') == -1):
         exit()
     
     # ADS1263 initialization sequence 
     ADC.ADS1263_WriteReg(0x04, 0x80) #FIR mode filter enabled, default config
     ADC.ADS1263_WriteReg(0x03, 0x10) # Enable CHOP mode
-    ADC.ADS1263_WriteReg(0x05, 0x85) # PGA bypassed with data rate of 50SPS
+    ADC.ADS1263_WriteReg(0x05, 0x88) # PGA bypassed with data rate of 400SPS
     ADC.ADS1263_WriteReg(0x01, 0x13) #Reset, VBIAS enabled (perhaps not required), internal reference enabled
     ADC.ADS1263_WriteReg(0x0F, 0x00) # REFMUX = 0x00 for internal reference
 
