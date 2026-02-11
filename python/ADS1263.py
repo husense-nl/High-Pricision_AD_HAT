@@ -27,6 +27,7 @@
 # THE SOFTWARE.
 #
 
+import time
 import config
 import RPi.GPIO as GPIO
 
@@ -172,6 +173,8 @@ class ADS1263:
         self.cs_pin = config.CS_PIN
         self.drdy_pin = config.DRDY_PIN
         self.ScanMode = 1
+        # Default ADC1 timeout; updated from configured data rate.
+        self.adc1_timeout_ms = 2000
 
     # Hardware reset
     def ADS1263_reset(self):
@@ -216,16 +219,18 @@ class ADS1263:
         return (sum&0xff) ^ byt     # if sum equal byt, this will be 0
     
     
-    # waiting for a busy end, just for ADC1
-    def ADS1263_WaitDRDY(self):
-        i = 0
-        while(1):
-            i+=1
+    # waiting for DRDY low, just for ADC1
+    def ADS1263_WaitDRDY(self, timeout_ms=None):
+        if timeout_ms is None:
+            timeout_ms = self.adc1_timeout_ms
+        deadline = time.monotonic() + (timeout_ms / 1000.0)
+        while time.monotonic() < deadline:
             if(config.digital_read(self.drdy_pin) == 0):
-                break
-            if(i >= 400000):
-                print ("Time Out ...\r\n")
-                break
+                return True
+            # Avoid a hot-spin loop and let the ADC complete conversion.
+            config.delay_ms(1)
+        print("Time Out waiting for DRDY ...")
+        return False
         
     # Check chip ID, success is return 1
     def ADS1263_ReadChipID(self):
@@ -235,10 +240,36 @@ class ADS1263:
     
     def ADS1263_SetMode(self, Mode):
         self.ScanMode = Mode
+
+    def _adc1_timeout_from_drate(self, drate_code):
+        # ADS1263 ADC1 data-rate code to samples/second.
+        sps_map = {
+            0xF: 38400.0,
+            0xE: 19200.0,
+            0xD: 14400.0,
+            0xC: 7200.0,
+            0xB: 4800.0,
+            0xA: 2400.0,
+            0x9: 1200.0,
+            0x8: 400.0,
+            0x7: 100.0,
+            0x6: 60.0,
+            0x5: 50.0,
+            0x4: 20.0,
+            0x3: 16.6,
+            0x2: 10.0,
+            0x1: 5.0,
+            0x0: 2.5,
+        }
+        sps = sps_map.get(drate_code, 2.5)
+        # Conservative timeout for filter settling and channel switching.
+        timeout_ms = int((4.0 / sps) * 1000.0) + 250
+        return max(250, min(timeout_ms, 5000))
         
         
     #The configuration parameters of ADC, gain and data rate
     def ADS1263_ConfigADC(self, gain, drate):
+        self.adc1_timeout_ms = self._adc1_timeout_from_drate(drate)
         MODE2 = 0x80    # 0x80:PGA bypassed, 0x00:PGA enabled
         MODE2 |= (gain << 4) | drate
         self.ADS1263_WriteReg(ADS1263_REG['REG_MODE2'], MODE2)
@@ -388,11 +419,18 @@ class ADS1263:
     # Read ADC data
     def ADS1263_Read_ADC_Data(self):
         config.digital_write(self.cs_pin, GPIO.LOW)#cs  0
+        timeout_ms = self.adc1_timeout_ms
+        deadline = time.monotonic() + (timeout_ms / 1000.0)
         while(1):
             config.spi_writebyte([ADS1263_CMD['CMD_RDATA1']])
             # config.delay_ms(10)
             if(config.spi_readbytes(1)[0] & 0x40 != 0):
                 break
+            if time.monotonic() >= deadline:
+                config.digital_write(self.cs_pin, GPIO.HIGH)#cs 1
+                print("Time Out waiting for ADC1 data ready ...")
+                return None
+            config.delay_ms(1)
         buf = config.spi_readbytes(5)
         config.digital_write(self.cs_pin, GPIO.HIGH)#cs 1
         read  = (buf[0]<<24) & 0xff000000
@@ -433,14 +471,16 @@ class ADS1263:
                 print("The number of channels must be less than 10")
                 return 0
             self.ADS1263_SetChannal(Channel)
-            self.ADS1263_WaitDRDY()
+            if not self.ADS1263_WaitDRDY():
+                return None
             Value = self.ADS1263_Read_ADC_Data()
         else:
             if(Channel>4):
                 print("The number of channels must be less than 5")
                 return 0
             self.ADS1263_SetDiffChannal(Channel)
-            self.ADS1263_WaitDRDY()
+            if not self.ADS1263_WaitDRDY():
+                return None
             Value = self.ADS1263_Read_ADC_Data()
         return Value
 

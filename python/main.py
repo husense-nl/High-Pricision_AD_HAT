@@ -136,6 +136,9 @@ try:
         while(1):
             ADC_Value = ADC.ADS1263_GetAll(channelList) 
             for i in channelList:
+                if ADC_Value[i] is None:
+                    print("ADC1 IN%d read skipped due to timeout" % i)
+                    continue
                 if(ADC_Value[i]>>31 ==1):
                     Van = (REF*2 - ADC_Value[i] * REF / 0x80000000) 
                     sign = -1.0 # capturing the sign since Van is always positive. The sign indicates the direction of the differential voltage with reference to the thermistor voltage. This is relevant for thermopile
